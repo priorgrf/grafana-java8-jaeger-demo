@@ -1,0 +1,41 @@
+services:
+  app:
+    build: .
+    ports: ["8080:8080"]
+    environment:
+      JAEGER_ENDPOINT: http://alloy:14268/api/traces
+      JAEGER_SAMPLER_TYPE: const
+      JAEGER_SAMPLER_PARAM: "1"
+    depends_on: [alloy]
+
+  alloy:
+    image: grafana/alloy:latest
+    command: [run, --server.http.listen-addr=0.0.0.0:12345, /etc/alloy/config.alloy]
+    ports: ["12345:12345"]
+    environment:
+      GRAFANA_CLOUD_OTLP_ENDPOINT: ${GRAFANA_CLOUD_OTLP_ENDPOINT:?set in .env}
+      GRAFANA_CLOUD_INSTANCE_ID: ${GRAFANA_CLOUD_INSTANCE_ID:?set in .env}
+      GRAFANA_CLOUD_API_TOKEN: ${GRAFANA_CLOUD_API_TOKEN:?set in .env}
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy
+    depends_on: [jaeger]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports: ["16686:16686"]
+
+  loadgen:
+    image: curlimages/curl:latest
+    depends_on: [app]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 10
+        while true; do
+          curl -s app:8080/hello >/dev/null
+          curl -s app:8080/work >/dev/null
+          [ $$(( $$(date +%s) % 5 )) -eq 0 ] && curl -s app:8080/error >/dev/null
+          sleep 1
+        done
